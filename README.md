@@ -6,7 +6,7 @@
 
 先安裝[Chrome for tampermonkey](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=zh-TW)外掛
 
-再點選[ebird-checklist 腳本](https://github.com/KennyChou/tampermonkey-ebird-track/raw/main/dist/ebird-trip.user.js)
+再點選[ebird-checklist 腳本](https://github.com/KennyChou/tampermonkey-ebird-track/raw/main/dist/ebird-track.user.js)
 
 ## 參考
 
