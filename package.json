@@ -1,8 +1,8 @@
 {
-  "name": "tampermonkey-vue",
-  "version": "1.0.0",
-  "description": "使用Vue Element-UI构建油猴TamperMonkey插件",
-  "author": "harry",
+  "name": "ebird-track",
+  "version": "1.0.1",
+  "description": "eBird gps track download",
+  "author": "Kenny Chou",
   "private": true,
   "main": "/src/main.js",
   "keywords": [
