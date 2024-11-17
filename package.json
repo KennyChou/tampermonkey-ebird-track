@@ -1,6 +1,6 @@
 {
   "name": "ebird-track",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "eBird gps track download",
   "author": "Kenny Chou",
   "private": true,

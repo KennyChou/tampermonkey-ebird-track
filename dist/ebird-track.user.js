@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ebird-track
 // @namespace    https://kennychou.github.io/
-// @version      1.0.2
+// @version      1.0.3
 // @description  eBird GPS Track Download
 // @author       Kenny Chou
 // @grant        GM_getValue
