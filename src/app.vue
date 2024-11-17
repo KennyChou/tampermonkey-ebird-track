@@ -61,7 +61,7 @@ export default {
         )[0].textContent
       }
       // const sid = this.xpath(document, '//input[@name="subID"]')[0].value
-      const sid = xpath(document, '//a[@id="chk-tools-delete"]')[0].dataset['subid']
+      const sid = this.xpath(document, '//a[@id="chk-tools-delete"]')[0].dataset['subid']
       const [d, t] = this.xpath(document, '//time')[0].dateTime.split('T')
 
       if (this.xpath('', '//div[@data-maptrack]').length == 2) {
