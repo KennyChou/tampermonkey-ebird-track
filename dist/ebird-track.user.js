@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ebird-track
 // @namespace    https://kennychou.github.io/
-// @version      2.0.4
+// @version      2.0.5
 // @description  eBird GPS Track Download
 // @author       Kenny Chou
 // @grant        none
@@ -23,33 +23,53 @@
     window.__ebirdGPS = null;
 
     // ── Primary: intercept google.maps.Polyline ───────────────────────
-    // The track is always rendered as a Polyline — capture coords there.
-    function patchPolyline(maps) {
-      if(!maps.Polyline || maps.Polyline.__ebirdPatched) return;
-      var Orig = maps.Polyline;
-      maps.Polyline = function(opts) {
-        if(opts && opts.path && !window.__ebirdGPS) {
-          var arr = (opts.path && typeof opts.path.getArray==='function') ? opts.path.getArray() : opts.path;
-          if(arr && arr.length > 1) {
-            var coords = [];
-            for(var i=0; i<arr.length; i++) {
-              var p=arr[i];
-              var lat=(typeof p.lat==='function')?p.lat():p.lat;
-              var lng=(typeof p.lng==='function')?p.lng():p.lng;
-              coords.push(lng+','+lat);
-            }
-            window.__ebirdGPS = coords.join(',');
-          }
-        }
-        return new Orig(opts);
-      };
-      maps.Polyline.prototype = Orig.prototype;
-      maps.Polyline.__ebirdPatched = true;
+    // eBird uses loading=async, so Polyline is NOT on google.maps directly —
+    // it comes from await google.maps.importLibrary('maps') as {Polyline,...}.
+    // We intercept importLibrary and patch the returned Polyline class.
+    function extractCoords(opts) {
+      if(!opts || !opts.path || window.__ebirdGPS) return;
+      var arr = (typeof opts.path.getArray==='function') ? opts.path.getArray() : opts.path;
+      if(!arr || arr.length < 2) return;
+      var coords = [];
+      for(var i=0; i<arr.length; i++) {
+        var p=arr[i];
+        var lat=(typeof p.lat==='function')?p.lat():p.lat;
+        var lng=(typeof p.lng==='function')?p.lng():p.lng;
+        coords.push(lng+','+lat);
+      }
+      window.__ebirdGPS = coords.join(',');
     }
 
-    // Intercept window.google setter — Maps script loads after document-start.
-    // IMPORTANT: _google must start as undefined (not null) so typeof google === 'undefined'
-    // before Maps loads — eBird uses typeof to decide whether to load Maps.
+    function patchPolylineOn(obj) {
+      if(!obj || !obj.Polyline || obj.Polyline.__ebirdPatched) return;
+      var Orig = obj.Polyline;
+      obj.Polyline = function(opts) { extractCoords(opts); return new Orig(opts); };
+      obj.Polyline.prototype = Orig.prototype;
+      obj.Polyline.__ebirdPatched = true;
+    }
+
+    function patchMaps(maps) {
+      if(!maps || maps.__ebirdMapsPatched) return;
+      maps.__ebirdMapsPatched = true;
+
+      // Patch classic API
+      patchPolylineOn(maps);
+
+      // Patch async API: importLibrary('maps') returns {Polyline, Map, ...}
+      if(typeof maps.importLibrary === 'function') {
+        var _origImport = maps.importLibrary;
+        maps.importLibrary = function(libName) {
+          return Promise.resolve(_origImport.apply(maps, arguments)).then(function(lib) {
+            if(lib && lib.Polyline) patchPolylineOn(lib);
+            return lib;
+          });
+        };
+      }
+    }
+
+    // Intercept window.google setter — Maps bootstrap script sets it after document-start.
+    // IMPORTANT: _google must start as undefined so typeof google === 'undefined'
+    // before Maps loads; eBird uses this to decide whether to load Maps.
     var _google = (typeof window.google !== 'undefined') ? window.google : undefined;
     if(!_google) {
       Object.defineProperty(window, 'google', {
@@ -57,17 +77,22 @@
         set: function(val){
           _google = val;
           if(val && val.maps) {
-            if(val.maps.Polyline) { patchPolyline(val.maps); }
+            // maps may grow incrementally; wait for importLibrary or Polyline
+            if(val.maps.importLibrary || val.maps.Polyline) { patchMaps(val.maps); }
             else {
-              var t=setInterval(function(){ if(val.maps&&val.maps.Polyline){patchPolyline(val.maps);clearInterval(t);} },20);
-              setTimeout(function(){clearInterval(t);},15000);
+              var t=setInterval(function(){
+                if(val.maps && (val.maps.importLibrary || val.maps.Polyline)){
+                  patchMaps(val.maps); clearInterval(t);
+                }
+              }, 20);
+              setTimeout(function(){clearInterval(t);}, 30000);
             }
           }
         },
         configurable: true
       });
     }
-    if(_google && _google.maps && _google.maps.Polyline) patchPolyline(_google.maps);
+    if(_google && _google.maps) patchMaps(_google.maps);
 
     // ── Fallback: DOM removal interception ────────────────────────────
     function checkNode(n){
