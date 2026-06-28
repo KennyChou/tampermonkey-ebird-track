@@ -15,10 +15,11 @@ export default {
     return {}
   },
   methods: {
-    exportTrack() {
-      const data = this.getGPS()
+    async exportTrack() {
+      const data = await this.getGPS()
 
       if (data.gpsdata.length == 0) {
+        alert('找不到 GPS 軌跡資料')
         return
       }
       const kml = new KMLify({ name: data.locname })
@@ -42,7 +43,8 @@ export default {
 
       return saveAs(data, filename + '.kml')
     },
-    getGPS() {
+    async getGPS() {
+      // 從 live DOM 取得地點名稱與 checklist 基本資訊
       var locname
       if (
         this.xpath(
@@ -60,19 +62,26 @@ export default {
           '//section[@aria-labelledBy="primary-details"]//div[@class="Heading Heading--h3 u-margin-none"]//span'
         )[0].textContent
       }
-      // const sid = this.xpath(document, '//input[@name="subID"]')[0].value
       const sid = this.xpath(document, '//a[@id="chk-tools-delete"]')[0].dataset['subid']
       const [d, t] = this.xpath(document, '//time')[0].dateTime.split('T')
 
-      if (this.xpath('', '//div[@data-maptrack]').length == 2) {
+      // GPS 資料由 Vue 元件初始化時從 DOM 移除，需 fetch 原始 HTML 取得
+      const res = await fetch(window.location.href)
+      const html = await res.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+
+      const trackEls = doc.querySelectorAll('[data-maptrack][data-maptrack-data]')
+      if (trackEls.length > 0) {
         return {
           locname: locname,
-          gpsdata: this.xpath('', '//div[@data-maptrack]')[0].dataset[
-            'maptrackData'
-          ].split(','),
+          sid: sid,
+          date: d,
+          time: t,
+          gpsdata: trackEls[0].dataset['maptrackData'].split(','),
         }
       }
-      return { locname: locname, gpsdata: [] }
+      return { locname: locname, sid: sid, date: d, time: t, gpsdata: [] }
     },
 
     xpath(node, xpathToExecute) {
