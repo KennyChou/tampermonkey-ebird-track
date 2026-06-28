@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ebird-track
 // @namespace    https://kennychou.github.io/
-// @version      2.0.0
+// @version      2.0.2
 // @description  eBird GPS Track Download
 // @author       Kenny Chou
 // @grant        none
@@ -13,34 +13,62 @@
 (function () {
   'use strict';
 
-  let gpsData = null;
+  // ── Step 1: inject GPS capture code into main world via <script> tag ──
+  // Tampermonkey may run in an isolated JS world even with @grant none.
+  // Injecting a <script> element guarantees execution in the page's main world,
+  // where our removeChild patch affects eBird's own Vue code.
+  const captureScript = document.createElement('script');
+  captureScript.id = '__ebird_gps_capture__';
+  captureScript.textContent = `(function(){
+    if(window.__ebirdGPSReady) return;
+    window.__ebirdGPSReady = true;
+    window.__ebirdGPS = null;
 
-  // Capture GPS data from data-maptrack-data before eBird's Vue removes it
-  const gpsObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        const candidates = node.dataset && node.dataset.maptrackData
-          ? [node]
-          : Array.from(node.querySelectorAll('[data-maptrack-data]'));
-        for (const el of candidates) {
-          if (el.dataset.maptrackData) {
-            gpsData = el.dataset.maptrackData;
-            gpsObserver.disconnect();
-            return;
-          }
+    var _rc = Node.prototype.removeChild;
+    Node.prototype.removeChild = function(child){
+      if(!window.__ebirdGPS && child && child.nodeType===1){
+        var d = child.dataset && child.dataset.maptrackData;
+        if(d){ window.__ebirdGPS = d; Node.prototype.removeChild = _rc; }
+        else{
+          try{
+            var f = child.querySelector('[data-maptrack-data]');
+            if(f && f.dataset.maptrackData){
+              window.__ebirdGPS = f.dataset.maptrackData;
+              Node.prototype.removeChild = _rc;
+            }
+          }catch(e){}
         }
       }
+      return _rc.call(this, child);
+    };
+
+    var _ih = Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+    if(_ih && _ih.set){
+      Object.defineProperty(Element.prototype,'innerHTML',{
+        set:function(v){
+          if(!window.__ebirdGPS){
+            try{
+              var f=this.querySelector('[data-maptrack-data]');
+              if(f&&f.dataset.maptrackData){
+                window.__ebirdGPS=f.dataset.maptrackData;
+                Object.defineProperty(Element.prototype,'innerHTML',_ih);
+              }
+            }catch(e){}
+          }
+          _ih.set.call(this,v);
+        },
+        get:function(){return _ih.get.call(this);},
+        configurable:true
+      });
     }
-  });
+  })();`;
 
-  gpsObserver.observe(document, { childList: true, subtree: true });
+  (document.head || document.documentElement).appendChild(captureScript);
 
-  // Inject download button once DOM is ready
+  // ── Step 2: inject download button at DOMContentLoaded ───────────────
   document.addEventListener('DOMContentLoaded', () => {
     const anchor = document.getElementById('tracks');
     if (!anchor) return;
-
     const btn = document.createElement('button');
     btn.textContent = '下載軌跡';
     btn.className = 'Button Button--highlight';
@@ -49,7 +77,9 @@
     anchor.after(btn);
   });
 
+  // ── Step 3: download logic ────────────────────────────────────────────
   function downloadTrack() {
+    const gpsData = window.__ebirdGPS;
     if (!gpsData) {
       alert('找不到 GPS 軌跡資料');
       return;
@@ -82,15 +112,14 @@
     return '<?xml version="1.0" encoding="UTF-8"?>\n' +
       '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
       '  <Document>\n' +
-      '    <name>' + x(docName) + '</name>\n' +
-      '    <Style id="trackStyle">\n' +
+      '    <name>' + esc(docName) + '</name>\n' +
+      '    <Style id="s">\n' +
       '      <LineStyle><color>ff0000ff</color><width>4</width></LineStyle>\n' +
       '    </Style>\n' +
       '    <Placemark>\n' +
-      '      <name>' + x(placemarkName) + '</name>\n' +
-      '      <styleUrl>#trackStyle</styleUrl>\n' +
-      '      <LineString>\n' +
-      '        <tessellate>1</tessellate>\n' +
+      '      <name>' + esc(placemarkName) + '</name>\n' +
+      '      <styleUrl>#s</styleUrl>\n' +
+      '      <LineString><tessellate>1</tessellate>\n' +
       '        <coordinates>' + coordStr + '</coordinates>\n' +
       '      </LineString>\n' +
       '    </Placemark>\n' +
@@ -98,7 +127,7 @@
       '</kml>';
   }
 
-  function x(s) {
+  function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
