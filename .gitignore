@@ -13,3 +13,15 @@ yarn-error.log*
 # Editor directories and files
 .idea
 .vscode
+
+# Playwright debugging artifacts
+.playwright-mcp/
+
+# Local scratch screenshots
+ebird-checklist.png
+ebird-home.png
+
+# Alternate lockfiles (project's committed lockfile is yarn.lock)
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
