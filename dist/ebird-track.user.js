@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ebird-track
 // @namespace    https://kennychou.github.io/
-// @version      2.0.2
+// @version      2.0.3
 // @description  eBird GPS Track Download
 // @author       Kenny Chou
 // @grant        none
@@ -13,59 +13,89 @@
 (function () {
   'use strict';
 
-  // ── Step 1: inject GPS capture code into main world via <script> tag ──
-  // Tampermonkey may run in an isolated JS world even with @grant none.
-  // Injecting a <script> element guarantees execution in the page's main world,
-  // where our removeChild patch affects eBird's own Vue code.
+  // ── Inject GPS capture into main world via <script> tag ──────────────
+  // Primary: intercept google.maps.Polyline before eBird creates the track.
+  // Fallback: intercept removeChild/replaceChild/etc for data-maptrack-data.
   const captureScript = document.createElement('script');
-  captureScript.id = '__ebird_gps_capture__';
   captureScript.textContent = `(function(){
     if(window.__ebirdGPSReady) return;
     window.__ebirdGPSReady = true;
     window.__ebirdGPS = null;
 
-    var _rc = Node.prototype.removeChild;
-    Node.prototype.removeChild = function(child){
-      if(!window.__ebirdGPS && child && child.nodeType===1){
-        var d = child.dataset && child.dataset.maptrackData;
-        if(d){ window.__ebirdGPS = d; Node.prototype.removeChild = _rc; }
-        else{
-          try{
-            var f = child.querySelector('[data-maptrack-data]');
-            if(f && f.dataset.maptrackData){
-              window.__ebirdGPS = f.dataset.maptrackData;
-              Node.prototype.removeChild = _rc;
+    // ── Primary: intercept google.maps.Polyline ───────────────────────
+    // The track is always rendered as a Polyline — capture coords there.
+    function patchPolyline(maps) {
+      if(!maps.Polyline || maps.Polyline.__ebirdPatched) return;
+      var Orig = maps.Polyline;
+      maps.Polyline = function(opts) {
+        if(opts && opts.path && !window.__ebirdGPS) {
+          var arr = (opts.path && typeof opts.path.getArray==='function') ? opts.path.getArray() : opts.path;
+          if(arr && arr.length > 1) {
+            var coords = [];
+            for(var i=0; i<arr.length; i++) {
+              var p=arr[i];
+              var lat=(typeof p.lat==='function')?p.lat():p.lat;
+              var lng=(typeof p.lng==='function')?p.lng():p.lng;
+              coords.push(lng+','+lat);
             }
-          }catch(e){}
-        }
-      }
-      return _rc.call(this, child);
-    };
-
-    var _ih = Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
-    if(_ih && _ih.set){
-      Object.defineProperty(Element.prototype,'innerHTML',{
-        set:function(v){
-          if(!window.__ebirdGPS){
-            try{
-              var f=this.querySelector('[data-maptrack-data]');
-              if(f&&f.dataset.maptrackData){
-                window.__ebirdGPS=f.dataset.maptrackData;
-                Object.defineProperty(Element.prototype,'innerHTML',_ih);
-              }
-            }catch(e){}
+            window.__ebirdGPS = coords.join(',');
           }
-          _ih.set.call(this,v);
-        },
-        get:function(){return _ih.get.call(this);},
-        configurable:true
-      });
+        }
+        return new Orig(opts);
+      };
+      maps.Polyline.prototype = Orig.prototype;
+      maps.Polyline.__ebirdPatched = true;
     }
+
+    // Intercept window.google setter — Maps script loads after document-start
+    var _google = window.google || null;
+    Object.defineProperty(window, 'google', {
+      get: function(){ return _google; },
+      set: function(val){
+        _google = val;
+        if(val && val.maps) {
+          if(val.maps.Polyline) { patchPolyline(val.maps); }
+          else {
+            var t=setInterval(function(){ if(val.maps&&val.maps.Polyline){patchPolyline(val.maps);clearInterval(t);} },20);
+            setTimeout(function(){clearInterval(t);},15000);
+          }
+        }
+      },
+      configurable: true
+    });
+    if(_google && _google.maps && _google.maps.Polyline) patchPolyline(_google.maps);
+
+    // ── Fallback: DOM removal interception ────────────────────────────
+    function checkNode(n){
+      if(!n||n.nodeType!==1) return null;
+      var d=n.dataset&&n.dataset.maptrackData; if(d) return d;
+      try{var f=n.querySelector('[data-maptrack-data]');if(f)return f.dataset.maptrackData||null;}catch(e){}
+      return null;
+    }
+    function capDOM(d){if(d&&!window.__ebirdGPS)window.__ebirdGPS=d;}
+
+    var _rc=Node.prototype.removeChild;
+    Node.prototype.removeChild=function(c){capDOM(checkNode(c));return _rc.call(this,c);};
+
+    var _rpc=Node.prototype.replaceChild;
+    Node.prototype.replaceChild=function(n,o){capDOM(checkNode(o));return _rpc.call(this,n,o);};
+
+    var _rw=Element.prototype.replaceWith;
+    Element.prototype.replaceWith=function(){capDOM(checkNode(this));return _rw.apply(this,arguments);};
+
+    var _rm=Element.prototype.remove;
+    Element.prototype.remove=function(){capDOM(checkNode(this));return _rm.call(this);};
+
+    var _ih=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+    if(_ih&&_ih.set) Object.defineProperty(Element.prototype,'innerHTML',{
+      set:function(v){capDOM(checkNode(this));_ih.set.call(this,v);},
+      get:function(){return _ih.get.call(this);},configurable:true
+    });
   })();`;
 
   (document.head || document.documentElement).appendChild(captureScript);
 
-  // ── Step 2: inject download button at DOMContentLoaded ───────────────
+  // ── Inject download button at DOMContentLoaded ────────────────────────
   document.addEventListener('DOMContentLoaded', () => {
     const anchor = document.getElementById('tracks');
     if (!anchor) return;
@@ -77,7 +107,7 @@
     anchor.after(btn);
   });
 
-  // ── Step 3: download logic ────────────────────────────────────────────
+  // ── Download logic ───────────────────────────────────────────────────
   function downloadTrack() {
     const gpsData = window.__ebirdGPS;
     if (!gpsData) {
