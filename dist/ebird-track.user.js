@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ebird-track
 // @namespace    https://kennychou.github.io/
-// @version      2.0.3
+// @version      2.0.4
 // @description  eBird GPS Track Download
 // @author       Kenny Chou
 // @grant        none
@@ -47,22 +47,26 @@
       maps.Polyline.__ebirdPatched = true;
     }
 
-    // Intercept window.google setter — Maps script loads after document-start
-    var _google = window.google || null;
-    Object.defineProperty(window, 'google', {
-      get: function(){ return _google; },
-      set: function(val){
-        _google = val;
-        if(val && val.maps) {
-          if(val.maps.Polyline) { patchPolyline(val.maps); }
-          else {
-            var t=setInterval(function(){ if(val.maps&&val.maps.Polyline){patchPolyline(val.maps);clearInterval(t);} },20);
-            setTimeout(function(){clearInterval(t);},15000);
+    // Intercept window.google setter — Maps script loads after document-start.
+    // IMPORTANT: _google must start as undefined (not null) so typeof google === 'undefined'
+    // before Maps loads — eBird uses typeof to decide whether to load Maps.
+    var _google = (typeof window.google !== 'undefined') ? window.google : undefined;
+    if(!_google) {
+      Object.defineProperty(window, 'google', {
+        get: function(){ return _google; },
+        set: function(val){
+          _google = val;
+          if(val && val.maps) {
+            if(val.maps.Polyline) { patchPolyline(val.maps); }
+            else {
+              var t=setInterval(function(){ if(val.maps&&val.maps.Polyline){patchPolyline(val.maps);clearInterval(t);} },20);
+              setTimeout(function(){clearInterval(t);},15000);
+            }
           }
-        }
-      },
-      configurable: true
-    });
+        },
+        configurable: true
+      });
+    }
     if(_google && _google.maps && _google.maps.Polyline) patchPolyline(_google.maps);
 
     // ── Fallback: DOM removal interception ────────────────────────────
